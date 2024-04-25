@@ -114,6 +114,8 @@ struct wfs_inode *allocate_inode(int size, const char *path)
         return -1;
     }
 
+    // current is parent directory, add new directory entry for new inode
+
     int index = -1;
 
     if (token == NULL)

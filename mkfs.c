@@ -18,6 +18,7 @@ int main(int argc, char *argv[])
         switch (opt)
         {
         case 'd':
+            disk = optarg;
             break;
 
         case 'i':
