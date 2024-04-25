@@ -92,6 +92,14 @@ int main(int argc, char *argv[])
     lseek(disk_file, superblock.i_blocks_ptr, SEEK_SET);
     struct wfs_inode root_inode =
         {
-            .num = 0};
-    write(disk_file, &root_inode, sizeof(struct wfs_inode));
+            .num = ROOTNUM};
+    struct wfs_inode *inodeArray = (struct wfs_inode *)calloc(inodes, sizeof(struct wfs_inode));
+    inodeArray[0] = root_inode;
+    write(disk_file, &inodeArray, sizeof(struct wfs_inode));
+
+    // write data blocks to disk
+    lseek(disk_file, superblock.d_blocks_ptr, SEEK_SET);
+    unsigned char *data = (unsigned char *)calloc(blocks * BLOCK_SIZE, sizeof(unsigned char));
+
+    write(disk_file, data, blocks * BLOCK_SIZE);
 }

@@ -12,6 +12,49 @@
 char *disk;
 struct wfs_sb *sb;
 
+off_t allocate_block()
+{
+    for (int i = 0; i < sb->num_data_blocks; ++i)
+    {
+        off_t offset = (disk + sb->d_bitmap_ptr + i / 8);
+        int bit = i % 8;
+
+        int is_set = (offset >> bit) & 1; // this iterates over the bitmap looking for a bit that is not set
+
+        if (!is_set)
+        {
+            offset |= (1 << bit); // set the bit
+            return sb->d_bitmap_ptr + i * BLOCK_SIZE;
+        }
+    }
+
+    return NULL;
+}
+
+void remove_block(off_t block)
+{
+    int index = (block - sb->d_blocks_ptr) / BLOCK_SIZE;
+    off_t offset = (disk + sb->d_bitmap_ptr + index / 8);
+    char *zero = calloc(1, BLOCK_SIZE);
+    write(block, zero, BLOCK_SIZE);
+    int bit = index % 8;
+    offset &= ~(1 << bit); // unset the bit
+}
+
+void remove_inode(int index)
+{
+    off_t offset = (disk + sb->i_bitmap_ptr + index / 8);
+    int bit = index % 8;
+    struct wfs_inode *inode = (struct wfs_inode *)(disk + sb->i_blocks_ptr + index * sizeof(struct wfs_inode));
+    for (int i = 0; i < (inode->size + BLOCK_SIZE - 1) / BLOCK_SIZE; i++)
+    {
+        remove_block(inode->blocks[i]);
+    }
+    char *zero = calloc(1, sizeof(struct wfs_inode));
+    write(sb->i_blocks_ptr + index * sizeof(struct wfs_inode), zero, sizeof(struct wfs_inode));
+    offset &= ~(1 << bit); // unset the bit
+}
+
 struct wfs_inode *get_inode(const char *path)
 {
     struct wfs_inode *current = (struct wfs_inode *)(disk + sb->i_blocks_ptr); // set current to the first inode
@@ -32,21 +75,18 @@ struct wfs_inode *get_inode(const char *path)
             return NULL;
         }
 
-        struct wfs_dentry *dentry = (struct wfs_dentry *)(disk + current->blocks[0] * BLOCK_SIZE);
-
-        if (dentry == NULL)
-        {
-            return NULL;
-        }
-
         int found = 0;
-        for (int i = 0; i < current->size / sizeof(struct wfs_dentry); i++)
+        for (int i = 0; i < (current->size + BLOCK_SIZE - 1) / BLOCK_SIZE; i++)
         {
-            if (strcmp(dentry[i].name, token) == 0)
+            struct wfs_dentry *dentry = (struct wfs_dentry *)(disk + current->blocks[i] * BLOCK_SIZE);
+            for (int j = 0; j < BLOCK_SIZE / sizeof(struct wfs_dentry); j++)
             {
-                current = (struct wfs_inode *)(disk + sb->i_blocks_ptr + dentry[i].num * sizeof(struct wfs_inode));
-                found = 1;
-                break;
+                if (strcmp(dentry[j].name, token) == 0)
+                {
+                    current = (struct wfs_inode *)(disk + sb->i_blocks_ptr + dentry[j].num * sizeof(struct wfs_inode));
+                    found = 1;
+                    break;
+                }
             }
         }
 
@@ -83,21 +123,18 @@ struct wfs_inode *allocate_inode(int size, const char *path)
             return -1;
         }
 
-        struct wfs_dentry *dentry = (struct wfs_dentry *)(disk + current->blocks[0] * BLOCK_SIZE);
-
-        if (dentry == NULL)
-        {
-            return -1;
-        }
-
         int found = 0;
-        for (int i = 0; i < current->size / sizeof(struct wfs_dentry); i++)
+        for (int i = 0; i < (current->size + BLOCK_SIZE - 1) / BLOCK_SIZE; i++)
         {
-            if (strcmp(dentry[i].name, token) == 0)
+            struct wfs_dentry *dentry = (struct wfs_dentry *)(disk + current->blocks[i] * BLOCK_SIZE);
+            for (int j = 0; j < BLOCK_SIZE / sizeof(struct wfs_dentry); j++)
             {
-                current = (struct wfs_inode *)(disk + sb->i_blocks_ptr + dentry[i].num * sizeof(struct wfs_inode));
-                found = 1;
-                break;
+                if (strcmp(dentry[j].name, token) == 0)
+                {
+                    current = (struct wfs_inode *)(disk + sb->i_blocks_ptr + dentry[j].num * sizeof(struct wfs_inode));
+                    found = 1;
+                    break;
+                }
             }
         }
 
@@ -113,8 +150,6 @@ struct wfs_inode *allocate_inode(int size, const char *path)
     {
         return -1;
     }
-
-    // current is parent directory, add new directory entry for new inode
 
     int index = -1;
 
@@ -133,14 +168,35 @@ struct wfs_inode *allocate_inode(int size, const char *path)
         if (!is_set)
         {
             index = i;
-            // need to set the bit in the bitmap
+            offset |= (1 << bit); // set the bit
             break;
         }
     }
 
     if (index == -1)
     {
-        return -1;
+        return NULL;
+    }
+
+    // current is parent directory, add new directory entry for new inode
+    int added = -1;
+    for (int i = 0; i < (size + BLOCK_SIZE - 1) / BLOCK_SIZE; i++)
+    {
+        struct wfs_dentry *dentry = (struct wfs_dentry *)(disk + current->blocks[i] * BLOCK_SIZE);
+        for (int j = 0; j < BLOCK_SIZE / sizeof(struct wfs_dentry); j++)
+        {
+            if (dentry[j].num == 0)
+            {
+                dentry[j].num = index;
+                strcpy(dentry[j].name, token);
+                added = 1;
+                break;
+            }
+        }
+    }
+    if (added = -1)
+    {
+        return NULL;
     }
 
     struct wfs_inode *new_inode = (struct wfs_inode *)(disk + sb->i_blocks_ptr + index * sizeof(struct wfs_inode));
@@ -152,6 +208,21 @@ struct wfs_inode *allocate_inode(int size, const char *path)
     new_inode->atim = time(NULL);
     new_inode->mtim = time(NULL);
     new_inode->ctim = time(NULL);
+
+    // allocate blocks
+    int num_blocks = (size + BLOCK_SIZE - 1) / BLOCK_SIZE;
+
+    for (int i = 0; i < num_blocks; i++)
+    {
+        off_t block = allocate_block();
+        if (block == NULL)
+        {
+            return NULL;
+        }
+        new_inode->blocks[i] = block;
+    }
+
+    return new_inode;
 }
 
 static int wfs_getattr(const char *path, struct stat *stbuf)
