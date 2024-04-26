@@ -83,6 +83,8 @@ int main(int argc, char *argv[])
     lseek(disk_file, superblock.i_bitmap_ptr, SEEK_SET);
     int numIbytes = (inodes + 7) / 8;
     unsigned char *i_bitmap = (unsigned char *)calloc(numIbytes, sizeof(unsigned char));
+    // set first bit to 1
+    i_bitmap[0] |= 0x01;
     write(disk_file, i_bitmap, numIbytes);
     free(i_bitmap);
 
@@ -97,8 +99,16 @@ int main(int argc, char *argv[])
     lseek(disk_file, superblock.i_blocks_ptr, SEEK_SET);
     struct wfs_inode root_inode =
         {
-            .num = ROOTNUM};
-
+            .num = ROOTNUM,
+            .mode = __S_IFDIR | 0755,
+            .uid = getuid(),
+            .gid = getgid(),
+            .size = BLOCK_SIZE,
+            .nlinks = 2,
+            .atim = time(NULL),
+            .mtim = time(NULL),
+            .ctim = time(NULL)};
+    root_inode.blocks[0] = superblock.d_blocks_ptr;
     write(disk_file, &root_inode, sizeof(struct wfs_inode));
 
     // set rest of disk to 0
