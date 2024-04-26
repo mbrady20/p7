@@ -246,38 +246,203 @@ static int wfs_getattr(const char *path, struct stat *stbuf)
     return 0;
 }
 
-static int wfs_mknod(const char *path, mode_t mode, dev_t dev)
+static int wfs_mknod(const char *path, mode_t mode, dev_t rdev)
 {
+    // Check if an inode already exists at the given path
+    struct wfs_inode *inode = get_inode(path);
+    if (inode != NULL)
+    {
+        // If an inode already exists, return an error
+        return -EEXIST;
+    }
+
+    // Allocate a new inode at the given path
+    inode = allocate_inode(0, path);
+    if (inode == NULL)
+    {
+        // If the allocation fails (because there's no space left), return an error
+        return -ENOSPC;
+    }
+
+    // Set the mode and device of the new inode
+    inode->mode = mode;
+    inode->rdev = rdev;
+
+    // Return success
     return 0;
 }
 
 static int wfs_mkdir(const char *path, mode_t mode)
 {
+    // Check if an inode already exists at the given path
+    struct wfs_inode *inode = get_inode(path);
+    if (inode != NULL)
+    {
+        // If an inode already exists, return an error
+        return -EEXIST;
+    }
+
+    // Allocate a new inode at the given path with the size of a directory entry
+    inode = allocate_inode(sizeof(struct wfs_dentry), path);
+    if (inode == NULL)
+    {
+        // If the allocation fails (because there's no space left), return an error
+        return -ENOSPC;
+    }
+
+    // Set the mode of the new inode to directory
+    inode->mode = S_IFDIR | mode;
+
+    // Return success
     return 0;
 }
 
 static int wfs_unlink(const char *path)
 {
+    // Get the inode at the given path
+    struct wfs_inode *inode = get_inode(path);
+    if (inode == NULL)
+    {
+        // If no inode exists at the path, return an error
+        return -ENOENT;
+    }
+
+    // Check if the inode is a directory
+    if ((inode->mode & S_IFMT) == S_IFDIR)
+    {
+        // If the inode is a directory, return an error
+        return -EISDIR;
+    }
+
+    // Remove the inode
+    remove_inode(inode->num);
+
+    // Return success
     return 0;
 }
 
 static int wfs_rmdir(const char *path)
 {
+    // Get the inode at the given path
+    struct wfs_inode *inode = get_inode(path);
+    if (inode == NULL)
+    {
+        // If no inode exists at the path, return an error
+        return -ENOENT;
+    }
+
+    // Check if the inode is a directory
+    if ((inode->mode & S_IFMT) != S_IFDIR)
+    {
+        // If the inode is not a directory, return an error
+        return -ENOTDIR;
+    }
+
+    // Check if the directory is empty
+    if (is_directory_empty(inode))
+    {
+        // If the directory is not empty, return an error
+        return -ENOTEMPTY;
+    }
+
+    // Remove the inode
+    remove_inode(inode->num);
+
+    // Return success
     return 0;
 }
 
-static int wfs_read(const char *path, char *buf, size_t size, off_t offset, struct fuse_file_info *fi)
+static int wfs_read(const char *path, char *buf, size_t size, off_t offset,
+                    struct fuse_file_info *fi)
 {
-    return 0;
+    // Get the inode at the given path
+    struct wfs_inode *inode = get_inode(path);
+    if (inode == NULL)
+    {
+        // If no inode exists at the path, return an error
+        return -ENOENT;
+    }
+
+    // Check if the offset is beyond the end of the file
+    if (offset >= inode->size)
+    {
+        // If the offset is beyond the end of the file, return 0 (indicating end of file)
+        return 0;
+    }
+
+    // If the read would go beyond the end of the file, truncate it
+    if (offset + size > inode->size)
+    {
+        size = inode->size - offset;
+    }
+
+    // Copy the data from the inode's data to the buffer
+    memcpy(buf, inode->data + offset, size);
+
+    // Return the number of bytes read
+    return size;
 }
 
-static int wfs_write(const char *path, const char *buf, size_t size, off_t offset, struct fuse_file_info *fi)
+static int wfs_write(const char *path, const char *buf, size_t size,
+                     off_t offset, struct fuse_file_info *fi)
 {
-    return 0;
+    // Get the inode at the given path
+    struct wfs_inode *inode = get_inode(path);
+    if (inode == NULL)
+    {
+        // If no inode exists at the path, return an error
+        return -ENOENT;
+    }
+
+    // Check if the write would go beyond the end of the file
+    if (offset + size > inode->size)
+    {
+        // If the write would go beyond the end of the file, resize the file
+        if (resize_inode(inode, offset + size) != 0)
+        {
+            // If the resize fails, return an error
+            return -EFBIG;
+        }
+    }
+
+    // Copy the data from the buffer to the inode's data
+    memcpy(inode->data + offset, buf, size);
+
+    // Return the number of bytes written
+    return size;
 }
 
-static int wfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi)
+static int wfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
+                       off_t offset, struct fuse_file_info *fi)
 {
+    // Get the inode at the given path
+    struct wfs_inode *inode = get_inode(path);
+    if (inode == NULL)
+    {
+        // If no inode exists at the path, return an error
+        return -ENOENT;
+    }
+
+    // Check if the inode is a directory
+    if ((inode->mode & S_IFMT) != S_IFDIR)
+    {
+        // If the inode is not a directory, return an error
+        return -ENOTDIR;
+    }
+
+    // Iterate over the entries in the directory
+    struct wfs_dentry *dentry = (struct wfs_dentry *)inode->data;
+    for (int i = 0; i < inode->size / sizeof(struct wfs_dentry); i++)
+    {
+        // Add the entry to the readdir buffer
+        if (filler(buf, dentry[i].name, NULL, 0))
+        {
+            // If the buffer is full, stop
+            break;
+        }
+    }
+
+    // Return success
     return 0;
 }
 
