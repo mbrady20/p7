@@ -16,34 +16,34 @@ off_t allocate_block()
 {
     for (int i = 0; i < sb->num_data_blocks; ++i)
     {
-        off_t offset = (disk + sb->d_bitmap_ptr + i / 8);
+        char *offset = disk + sb->d_bitmap_ptr + i / 8;
         int bit = i % 8;
 
-        int is_set = (offset >> bit) & 1; // this iterates over the bitmap looking for a bit that is not set
+        int is_set = (*offset >> bit) & 1; // this iterates over the bitmap looking for a bit that is not set
 
         if (!is_set)
         {
-            offset |= (1 << bit); // set the bit
-            return sb->d_bitmap_ptr + i * BLOCK_SIZE;
+            *offset |= (1 << bit); // set the bit
+            return sb->d_blocks_ptr + i * BLOCK_SIZE;
         }
     }
 
-    return NULL;
+    return -1; // return -1 instead of NULL because the return type is off_t
 }
 
 void remove_block(off_t block)
 {
     int index = (block - sb->d_blocks_ptr) / BLOCK_SIZE;
-    off_t offset = (disk + sb->d_bitmap_ptr + index / 8);
+    char *offset = (disk + sb->d_bitmap_ptr + index / 8);
     char *zero = calloc(1, BLOCK_SIZE);
     write(block, zero, BLOCK_SIZE);
     int bit = index % 8;
-    offset &= ~(1 << bit); // unset the bit
+    *offset &= ~(1 << bit); // unset the bit
 }
 
 void remove_inode(int index)
 {
-    off_t offset = (disk + sb->i_bitmap_ptr + index / 8);
+    char *offset = (disk + sb->i_bitmap_ptr + index / 8);
     int bit = index % 8;
     struct wfs_inode *inode = (struct wfs_inode *)(disk + sb->i_blocks_ptr + index * sizeof(struct wfs_inode));
     for (int i = 0; i < (inode->size + BLOCK_SIZE - 1) / BLOCK_SIZE; i++)
@@ -52,7 +52,7 @@ void remove_inode(int index)
     }
     char *zero = calloc(1, sizeof(struct wfs_inode));
     write(sb->i_blocks_ptr + index * sizeof(struct wfs_inode), zero, sizeof(struct wfs_inode));
-    offset &= ~(1 << bit); // unset the bit
+    *offset &= ~(1 << bit); // unset the bit
 }
 
 struct wfs_inode *get_inode(const char *path)
@@ -120,7 +120,7 @@ struct wfs_inode *allocate_inode(int size, const char *path)
         }
         if ((current->mode & __S_IFMT) != __S_IFDIR)
         {
-            return -1;
+            return NULL;
         }
 
         int found = 0;
@@ -140,7 +140,7 @@ struct wfs_inode *allocate_inode(int size, const char *path)
 
         if (!found)
         {
-            return -1;
+            return NULL;
         }
 
         token = next_token;
@@ -148,27 +148,27 @@ struct wfs_inode *allocate_inode(int size, const char *path)
 
     if ((current->mode & __S_IFMT) != __S_IFDIR)
     {
-        return -1;
+        return NULL;
     }
 
     int index = -1;
 
     if (token == NULL)
     {
-        return -1;
+        return NULL;
     }
 
     for (int i = 0; i < sb->num_inodes; ++i)
     {
-        int offset = (disk + sb->i_bitmap_ptr + i / 8);
+        char *offset = (disk + sb->i_bitmap_ptr + i / 8);
         int bit = i % 8;
 
-        int is_set = (offset >> bit) & 1; // this iterates over the bitmap looking for a bit that is not set
+        int is_set = (*offset >> bit) & 1; // this iterates over the bitmap looking for a bit that is not set
 
         if (!is_set)
         {
             index = i;
-            offset |= (1 << bit); // set the bit
+            *offset |= (1 << bit); // set the bit
             break;
         }
     }
@@ -194,7 +194,7 @@ struct wfs_inode *allocate_inode(int size, const char *path)
             }
         }
     }
-    if (added = -1)
+    if (added == -1)
     {
         return NULL;
     }
@@ -215,7 +215,7 @@ struct wfs_inode *allocate_inode(int size, const char *path)
     for (int i = 0; i < num_blocks; i++)
     {
         off_t block = allocate_block();
-        if (block == NULL)
+        if (block == -1)
         {
             return NULL;
         }
@@ -321,5 +321,6 @@ int main(int argc, char *argv[])
     close(fd);
     sb = (struct wfs_sb *)disk;
 
+    printf("arg 1: %s\n", argv[0]);
     return fuse_main(argc - 1, argv + 1, &ops, NULL);
 }
