@@ -9,7 +9,7 @@
 #define D_BLOCK (6)
 #define IND_BLOCK (D_BLOCK + 1)
 #define N_BLOCKS (IND_BLOCK + 1)
-#define ROOTNUM (1)
+#define ROOTNUM (0)
 
 /*
   The fields in the superblock should reflect the structure of the filesystem.

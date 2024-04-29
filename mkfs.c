@@ -92,6 +92,7 @@ int main(int argc, char *argv[])
     lseek(disk_file, superblock.d_bitmap_ptr, SEEK_SET);
     int numDbytes = (blocks) / 8;
     unsigned char *d_bitmap = (unsigned char *)calloc(numDbytes, sizeof(unsigned char));
+    d_bitmap[0] |= 0x01;
     write(disk_file, d_bitmap, numDbytes);
     free(d_bitmap);
 
