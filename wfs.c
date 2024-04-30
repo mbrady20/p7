@@ -108,13 +108,13 @@ void remove_inode(int index)
 {
     char *offset = (disk + sb->i_bitmap_ptr + index / 8);
     int bit = index % 8;
-    struct wfs_inode *inode = (struct wfs_inode *)(disk + sb->i_blocks_ptr + index * sizeof(struct wfs_inode));
+    struct wfs_inode *inode = (struct wfs_inode *)(disk + sb->i_blocks_ptr + index * BLOCK_SIZE);
     for (int i = 0; i < (inode->size + BLOCK_SIZE - 1) / BLOCK_SIZE; i++)
     {
         remove_block(inode->blocks[i]);
     }
-    char *zero = calloc(1, sizeof(struct wfs_inode));
-    write(sb->i_blocks_ptr + index * sizeof(struct wfs_inode), zero, sizeof(struct wfs_inode));
+    char *zero = calloc(1, BLOCK_SIZE);
+    write(sb->i_blocks_ptr + index * BLOCK_SIZE, zero, BLOCK_SIZE);
     *offset &= ~(1 << bit); // unset the bit
 }
 
@@ -133,7 +133,6 @@ struct wfs_inode *get_inode(const char *path)
         return current;
     }
 
-    printf("howdy patnah\n");
     char *token = strtok(path_copy, "/");
 
     while (token != NULL)
@@ -141,6 +140,7 @@ struct wfs_inode *get_inode(const char *path)
 
         if ((current->mode & __S_IFMT) != __S_IFDIR)
         {
+            free(path_copy);
             return NULL;
         }
 
@@ -156,7 +156,7 @@ struct wfs_inode *get_inode(const char *path)
                 if (strcmp(dentry[j].name, token) == 0)
                 {
                     printf("Found matching dentry: %s\n", dentry[j].name);
-                    current = (struct wfs_inode *)(disk + sb->i_blocks_ptr + dentry[j].num * sizeof(struct wfs_inode));
+                    current = (struct wfs_inode *)(disk + sb->i_blocks_ptr + dentry[j].num * BLOCK_SIZE);
                     found = 1;
                     break;
                 }
@@ -166,6 +166,7 @@ struct wfs_inode *get_inode(const char *path)
         if (!found)
         {
             return NULL;
+            free(path_copy);
         }
 
         token = strtok(NULL, "/");
@@ -227,6 +228,7 @@ struct wfs_inode *allocate_inode(int size, const char *path)
         if ((current->mode & __S_IFMT) != __S_IFDIR)
         {
             printf("Current inode is not a directory\n");
+            free(path_copy);
             return NULL;
         }
 
@@ -240,7 +242,7 @@ struct wfs_inode *allocate_inode(int size, const char *path)
             {
                 if (strcmp(dentry[j].name, token) == 0)
                 {
-                    current = (struct wfs_inode *)(disk + sb->i_blocks_ptr + dentry[j].num * sizeof(struct wfs_inode));
+                    current = (struct wfs_inode *)(disk + sb->i_blocks_ptr + dentry[j].num * BLOCK_SIZE);
                     found = 1;
                     printf("Found matching dentry: %s\n", dentry[j].name);
                     break;
@@ -251,6 +253,7 @@ struct wfs_inode *allocate_inode(int size, const char *path)
         if (!found)
         {
             printf("No matching dentry found for token: %s\n", token);
+            free(path_copy);
             return NULL;
         }
 
@@ -260,6 +263,7 @@ struct wfs_inode *allocate_inode(int size, const char *path)
     if ((current->mode & __S_IFMT) != __S_IFDIR)
     {
         printf("Current inode is not a directory\n");
+        free(path_copy);
         return NULL;
     }
 
@@ -268,6 +272,7 @@ struct wfs_inode *allocate_inode(int size, const char *path)
     if (token == NULL)
     {
         printf("Token is NULL\n");
+        free(path_copy);
         return NULL;
     }
 
@@ -290,6 +295,7 @@ struct wfs_inode *allocate_inode(int size, const char *path)
     if (index == -1)
     {
         printf("No unset bit found in bitmap\n");
+        free(path_copy);
         return NULL;
     }
 
@@ -319,10 +325,11 @@ outer:
     if (added == -1)
     {
         printf("Failed to add new dentry\n");
+        free(path_copy);
         return NULL;
     }
 
-    struct wfs_inode *new_inode = (struct wfs_inode *)(disk + sb->i_blocks_ptr + index * sizeof(struct wfs_inode));
+    struct wfs_inode *new_inode = (struct wfs_inode *)(disk + sb->i_blocks_ptr + index * BLOCK_SIZE);
     new_inode->num = index;
     new_inode->size = size;
     new_inode->uid = getuid();
@@ -343,12 +350,13 @@ outer:
         if (block == -1)
         {
             printf("Failed to allocate block\n");
+            free(path_copy);
             return NULL;
         }
         new_inode->blocks[i] = block;
         printf("Allocated block: %ld\n", block);
     }
-
+    free(path_copy);
     return new_inode;
 }
 
@@ -687,7 +695,7 @@ int main(int argc, char *argv[])
         return -1;
     }
 
-    disk = (struct)(char *)mmap(NULL, st.st_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    disk = (char *)mmap(NULL, st.st_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
     if (disk == MAP_FAILED)
     {
         close(fd);
